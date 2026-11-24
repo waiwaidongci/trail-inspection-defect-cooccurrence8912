@@ -18,5 +18,11 @@ export const workspace = {
   deliveries: () => call('/deliveries'),
   schedule: data => call('/schedules', data),
   disable: id => call(`/schedules/${id}/disable`, {}),
+  supplementBatches: () => call('/supplement/batches'),
+  supplement: data => call('/supplement/batches', data),
+  ledgers: () => call('/supplement/ledgers'),
+  segmentStates: () => call('/supplement/segments'),
+  latestChecklist: () => call('/supplement/checklists/latest'),
+  checklists: () => call('/supplement/checklists'),
   download: (path, filename) => saveFile(path, session.token, filename),
 };

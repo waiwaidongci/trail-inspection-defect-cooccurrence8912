@@ -1,180 +1,37 @@
-from collections import Counter, defaultdict
-from datetime import date
+"""整批运行的试算入口：复用共现规则引擎并组装成运行结果表结构。"""
 from fractions import Fraction
-from itertools import combinations
-from typing import NamedTuple
+
+from src.domain import rules_engine as engine
+
+ALL_ROUTES = engine.ALL_ROUTES
+CLEAN = engine.CLEAN
+MIN_JOINT_COUNT = engine.MIN_JOINT_COUNT
+CHECK_ACTIONS = engine.CHECK_ACTIONS
 
 
-ALL_ROUTES = "全部步道"
-CLEAN = "无缺陷"
-MIN_JOINT_COUNT = 2
-CHECK_ACTIONS = {
-    "积水": "查看低点和横坡边缘有无存水或水痕，记录位置和范围。",
-    "青苔": "查看潮湿边缘和背阴侧有无苔斑，拍照记录覆盖范围。",
-    "排水口堵塞": "查看该段低点的格栅及出水端，记录落叶、淤泥及通水情况。",
-    "铺装松动": "查看破损点周边铺装有无翘边、缝隙和松动，标记砖块位置。",
-    "路缘破损": "沿相邻路缘检查缺口、错台及脱落件，记录长度和位置。",
-    "护栏松动": "查看立柱底座及可见连接件，记录偏斜或松脱位置。",
-    "标识倒伏": "核对该段导向牌及底座，记录倾倒或脱位的标识编号。",
-}
-
-
-class Segment(NamedTuple):
-    route: str
-    segment_id: str
-    day: date
-    defects: set[str]
-
-
-class Rule(NamedTuple):
-    antecedent: tuple[str, ...]
-    consequent: str
-    joint_count: int
-    antecedent_count: int
-    consequent_count: int
-    support: Fraction
-    confidence: Fraction
-    lift: Fraction
-
-
-def _text(value, label):
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{label}不能为空。")
-    return value.strip()
-
-
-def _threshold(params, key, default, label, minimum, maximum=None):
-    try:
-        value = Fraction(str(params.get(key, default)))
-    except (ValueError, ZeroDivisionError):
-        raise ValueError(f"{label}必须是有限数值。") from None
-    if value < minimum or (maximum is not None and value > maximum):
-        if maximum is None:
-            raise ValueError(f"{label}至少为 {float(minimum):g}。")
-        raise ValueError(f"{label}必须介于 {float(minimum):g} 和 {maximum} 之间。")
-    return value
-
-
-def _segments(rows, scope):
-    inspections = defaultdict(set)
-    for number, row in enumerate(rows, 1):
-        prefix = f"第 {number} 条巡检记录的"
-        route = _text(row.get("route"), f"{prefix}步道名称")
-        segment_id = _text(row.get("segment_id"), f"{prefix}路段编号")
-        raw_day = _text(row.get("inspection_date"), f"{prefix}完整巡检日期")
-        defect = _text(row.get("defect"), f"{prefix}缺陷类型")
-        if route == ALL_ROUTES:
-            raise ValueError(f"{prefix}步道名称应填写具体步道。")
-        try:
-            day = date.fromisoformat(raw_day)
-            if day.isoformat() != raw_day:
-                raise ValueError
-        except ValueError:
-            raise ValueError(f"{prefix}完整巡检日期必须为有效的 YYYY-MM-DD 日期。") from None
-        if defect != CLEAN and defect not in CHECK_ACTIONS:
-            raise ValueError(f"{prefix}缺陷类型“{defect}”不在巡检字典中。")
-        inspections[route, segment_id, day].add(defect)
-
-    latest = {}
-    for (route, segment_id, day), defects in sorted(inspections.items()):
-        if CLEAN in defects and len(defects) > 1:
-            raise ValueError(f"{route} {segment_id} 在 {day.isoformat()} 同时登记了无缺陷和具体缺陷。")
-        if scope == ALL_ROUTES or route == scope:
-            latest[route, segment_id] = Segment(route, segment_id, day, defects - {CLEAN})
-    if not latest:
-        raise ValueError("没有可用巡检路段，请核对步道范围或导入完整巡检记录。")
-    return list(latest.values()), len(inspections)
-
-
-def _apriori(segments, min_support):
-    min_count = max(MIN_JOINT_COUNT, min_support * len(segments))
-    singletons = Counter(defect for segment in segments for defect in segment.defects)
-    level = {(defect,): count for defect, count in singletons.items() if count >= min_count}
-    frequent = dict(level)
-    for size in (2, 3):
-        candidates = set()
-        for left, right in combinations(sorted(level), 2):
-            if left[:-1] == right[:-1]:
-                candidate = (*left, right[-1])
-                if all(subset in level for subset in combinations(candidate, size - 1)):
-                    candidates.add(candidate)
-        if not candidates:
-            break
-        counts = Counter(
-            itemset
-            for segment in segments
-            for itemset in combinations(sorted(segment.defects), size)
-            if itemset in candidates
-        )
-        level = {items: count for items, count in counts.items() if count >= min_count}
-        frequent.update(level)
-        if not level:
-            break
-    return frequent, singletons
-
-
-def _rules(frequent, total, min_confidence, min_lift):
-    rules = []
-    for itemset, joint_count in frequent.items():
-        if len(itemset) == 1:
-            continue
-        for consequent in itemset:
-            antecedent = tuple(defect for defect in itemset if defect != consequent)
-            antecedent_count = frequent[antecedent]
-            consequent_count = frequent[(consequent,)]
-            confidence = Fraction(joint_count, antecedent_count)
-            lift = confidence / Fraction(consequent_count, total)
-            if confidence >= min_confidence and lift >= min_lift:
-                rules.append(Rule(
-                    antecedent, consequent, joint_count, antecedent_count, consequent_count,
-                    Fraction(joint_count, total), confidence, lift,
-                ))
-    return sorted(rules, key=lambda rule: (
-        -rule.confidence, -rule.lift, -rule.joint_count, rule.antecedent, rule.consequent,
-    ))
-
-
-def _scores(rule):
-    return [
-        round(float(rule.support * 100), 2),
-        round(float(rule.confidence * 100), 2),
-        round(float(rule.lift), 3),
-    ]
-
-
-def _checklist(segments, rules):
-    checks = []
-    for segment in segments:
-        selected = {}
-        for rule in rules:
-            if rule.consequent not in segment.defects and segment.defects.issuperset(rule.antecedent):
-                selected.setdefault(rule.consequent, rule)
-        for consequent, rule in selected.items():
-            checks.append([
-                segment.route, segment.segment_id, segment.day.isoformat(), "、".join(rule.antecedent),
-                consequent, CHECK_ACTIONS[consequent], *_scores(rule),
-            ])
-    return checks
+def validate_rows(rows):
+    # 复用同一套字段与口径校验，导入期即可发现问题。
+    engine.build_daily(rows)
 
 
 def analyze(rows, params):
-    scope = _text(params.get("route_scope", ALL_ROUTES), "步道范围")
-    min_support = _threshold(params, "min_support", "0.15", "最低支持度", Fraction(1, 100), 1)
-    min_confidence = _threshold(params, "min_confidence", "0.60", "最低置信度", Fraction(1, 100), 1)
-    min_lift = _threshold(params, "min_lift", "1.25", "最低提升度", Fraction(101, 100))
-    segments, inspection_count = _segments(rows, scope)
+    scope = engine.text(params.get("route_scope", ALL_ROUTES), "步道范围")
+    min_support = engine.threshold(params, "min_support", "0.15", "最低支持度", Fraction(1, 100), 1)
+    min_confidence = engine.threshold(params, "min_confidence", "0.60", "最低置信度", Fraction(1, 100), 1)
+    min_lift = engine.threshold(params, "min_lift", "1.25", "最低提升度", Fraction(101, 100))
+    segments, inspection_count = engine.segments_from_rows(rows, scope)
     total = len(segments)
-    frequent, singletons = _apriori(segments, min_support)
-    rules = _rules(frequent, total, min_confidence, min_lift)
-    checks = _checklist(segments, rules)
-    affected = len({(row[0], row[1]) for row in checks})
+    frequent, singletons = engine.apriori(segments, min_support)
+    rules = engine.build_rules(frequent, total, min_confidence, min_lift)
+    checks = engine.build_checklist(segments, rules)
+    affected = len({(item["route"], item["segment_id"]) for item in checks})
     clean_count = sum(not segment.defects for segment in segments)
     summary = f"{scope}纳入 {total} 个路段（{clean_count} 个无缺陷），共 {len(rules)} 条达标规则。"
     if checks:
-        route, segment_id, _, _, defect, *_evidence = checks[0]
+        first = checks[0]
         summary += (
             f"下一班对 {affected} 个路段加查 {len(checks)} 项，"
-            f"其中 {route} {segment_id} 需加查{defect}。"
+            f"其中 {first['route']} {first['segment_id']} 需加查{first['consequent']}。"
         )
     elif rules:
         summary += "已登记的缺陷覆盖了现有规则命中的后项，按原清单巡检。"
@@ -196,7 +53,11 @@ def analyze(rows, params):
                     "步道", "路段编号", "最近巡检", "已登记前项", "加查缺陷", "现场核验动作",
                     "支持度（%）", "置信度（%）", "提升度（倍）",
                 ],
-                "rows": checks,
+                "rows": [
+                    [item["route"], item["segment_id"], item["inspection_date"], item["antecedent"],
+                     item["consequent"], item["action"], *engine.scores(item["rule"])]
+                    for item in checks
+                ],
             },
             {
                 "title": "达标共现规则",
@@ -206,7 +67,7 @@ def analyze(rows, params):
                 ],
                 "rows": [
                     ["、".join(rule.antecedent), rule.consequent, rule.joint_count,
-                     rule.antecedent_count, rule.consequent_count, *_scores(rule)]
+                     rule.antecedent_count, rule.consequent_count, *engine.scores(rule)]
                     for rule in rules
                 ],
             },
@@ -216,7 +77,7 @@ def analyze(rows, params):
                 "rows": [
                     [segment.route, segment.segment_id, segment.day.isoformat(),
                      "、".join(sorted(segment.defects)) or CLEAN]
-                    for segment in segments
+                    for segment in sorted(segments, key=lambda item: (item.route, item.segment_id))
                 ],
             },
         ],

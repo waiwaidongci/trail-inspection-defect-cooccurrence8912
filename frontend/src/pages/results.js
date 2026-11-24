@@ -11,7 +11,7 @@ import {date, value} from '../utils/format.js';
 export async function results(route, refresh) {
   const {spec,runs,datasets} = workspace;
   const id = route.id || runs[0]?.id;
-  if (!id) return panel(spec.pages[3],empty('还没有可查看的运行结果。','#run','前往运行'));
+  if (!id) return panel(spec.pages[4],empty('还没有可查看的运行结果。','#run','前往运行'));
   const job = await workspace.getRun(id);
   const source = datasets.find(item => item.id === job.dataset_id);
   const message = feedback();

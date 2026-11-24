@@ -28,3 +28,10 @@ class ScheduleRequest(RunRequest):
     recipient: str = Field(min_length=1, max_length=100)
     first_at: datetime
     repeat_daily: bool = False
+
+class SupplementRequest(Request):
+    name: str = Field(min_length=1, max_length=120)
+    filename: str = Field(min_length=1, max_length=160)
+    csv_text: str = Field(min_length=1, max_length=2_000_000)
+    idempotency_key: str = Field(default='', max_length=80)
+    params: dict = Field(default_factory=dict)

@@ -6,13 +6,14 @@ import {login} from './pages/login.js';
 import {overview} from './pages/overview.js';
 import {results} from './pages/results.js';
 import {runPage} from './pages/run.js';
+import {supplementPage} from './pages/supplement.js';
 import {pages, route} from './router/routes.js';
 import {session} from './stores/session.js';
 import {workspace} from './stores/workspace.js';
 import {button, el, h, link, p} from './utils/dom.js';
 
 const app = document.getElementById('app');
-const views = {overview, inputs, run:runPage, results, review:reviewPage, delivery:deliveryPage};
+const views = {overview, inputs, supplement: supplementPage, run: runPage, results, review: reviewPage, delivery: deliveryPage};
 let revision = 0;
 
 function shell(state, content) {
