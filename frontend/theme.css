@@ -1,0 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Neuton&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+
+:root {
+  --ink: oklch(0.26 0.042 137); --paper: oklch(0.967 0.035 90); --accent: oklch(0.42 0.092 132); --panel: oklch(0.913 0.055 105);
+  --accent-ink: oklch(99% .01 85);
+  --accent-soft: color-mix(in oklch,var(--accent) 13%,var(--panel));
+  --muted: color-mix(in oklch,var(--ink) 76%,var(--paper));
+  --line: color-mix(in oklch,var(--ink) 24%,var(--paper));
+  --nav: color-mix(in oklch,var(--ink) 93%,var(--accent)); --nav-ink: var(--paper);
+  --display: 'Neuton', 'PingFang SC', 'Songti SC', serif;
+  --body: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+.business-series {list-style:none;padding:0;display:grid;gap:.45rem;}
+.business-series li {display:grid;grid-template-columns:minmax(5rem,1fr) minmax(3rem,3fr) auto;gap:.7rem;align-items:center;}
+.bar-track {width:100%;height:.7rem;position:relative;background:var(--accent-soft);}
+.bar-track i {position:absolute;top:0;height:100%;background:var(--accent);}
+.hero {border-bottom:5px double var(--accent)} .brand {border-bottom-style:dashed}
